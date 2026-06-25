@@ -5,10 +5,12 @@ metadata:
   namespace: envoy-gateway-system
 spec:
   type: NodePort
-  ports:
-    - name: http
-      port: 80
-      targetPort: 8080 # El contenedor de Envoy internamente suele escuchar en el 8080
-      nodePort: 80     # Alínea con el extraPortMapping de Kind
   selector:
-    gateway.envoyproxy.io/gateway-name: moto-lab-gateway
+    app.kubernetes.io/name: envoy
+    gateway.envoyproxy.io/owning-gateway-name: moto-lab-gateway
+    gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
+  ports:
+  - name: http
+    port: 80
+    targetPort: 10080  # <-- CORREGIDO: El puerto real de Envoy
+    nodePort: 31573
