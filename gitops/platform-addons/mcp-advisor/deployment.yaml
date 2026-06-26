@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-k8s-advisor
+  namespace: argocd
+  labels:
+    app: mcp-k8s-advisor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-k8s-advisor
+  template:
+    metadata:
+      labels:
+        app: mcp-k8s-advisor
+    spec:
+      # --- CLAVE: Le asignamos la identidad con permisos que creamos en el Hito 2 ---
+      serviceAccountName: mcp-advisor-sa
+      containers:
+        - name: advisor
+          # Nota: Esta es una imagen local que construiremos en el clúster de Kind, 
+          # o podés subirla a tu Docker Hub. Por ahora la dejamos declarada:
+          image: crisfiori/mcp-k8s-advisor:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
