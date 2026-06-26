@@ -2,3 +2,7 @@
 platform/
 docs/
 *.md
+# Ignorar binarios compilados de Go en cualquier subcarpeta
+mcp-k8s-advisor
+*.exe
+*.test
