@@ -1,0 +1,4 @@
+# Ignorar por completo el código de la aplicación para que ArgoCD no gaste tiempo procesándolo
+platform/
+docs/
+*.md
