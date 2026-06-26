@@ -11,6 +11,8 @@ spec:
     repoURL: 'https://github.com/CrisFiori/moto-lab.git'
     targetRevision: HEAD
     path: gitops/infrastructure # <-- Acá le decimos que lea esa carpeta
+    directory:
+      recurse: true
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: argocd
