@@ -3,14 +3,15 @@ kind: Application
 metadata:
   name: root-app
   namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
     repoURL: 'https://github.com/CrisFiori/moto-lab.git'
     targetRevision: HEAD
     path: gitops
+    directory:
+      recurse: false # La raíz no necesita recursividad profunda
+      include: '{infrastructure-apps.yaml,business-apps.yaml,platform-apps.yaml}' # <- Agregamos platform-apps.yaml acá
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: argocd
