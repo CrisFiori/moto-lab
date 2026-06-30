@@ -5,110 +5,108 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
-// Estructura para decodificar lo que nos manda la IA (JSON-RPC básico)
-type JSONRPCRequest struct {
+// Estructuras para el protocolo JSON-RPC de MCP
+type Request struct {
 	JSONRPC string          `json:"jsonrpc"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
-	ID      interface{}     `json:"id"`
+	ID      interface{}     `json:"id,omitempty"`
 }
 
-// Estructura para armar la respuesta que espera la IA
-type JSONRPCResponse struct {
+type Response struct {
 	JSONRPC string      `json:"jsonrpc"`
 	Result  interface{} `json:"result,omitempty"`
 	Error   interface{} `json:"error,omitempty"`
 	ID      interface{} `json:"id"`
 }
 
-// Formato específico del protocolo MCP para devolver texto a un LLM
-type MCPResult struct {
-	Content []MCPContent `json:"content"`
-}
+// obtenerKubeConfig detecta dinámicamente el entorno (In-Cluster o Local via KUBECONFIG)
+func obtenerKubeConfig() (*rest.Config, error) {
+	// 1. Intentar con la configuración interna del Pod (Producción en K8s)
+	config, err := rest.InClusterConfig()
+	if err == nil {
+		return config, nil
+	}
 
-type MCPContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
+	// 2. Si falla, estamos local (Desarrollo con túnel SSH)
+	fmt.Fprintln(os.Stderr, "ℹ️ Fuera del clúster. Buscando configuración local...")
+	kubeconfigEnv := os.Getenv("KUBECONFIG")
+
+	if kubeconfigEnv == "" {
+		home, _ := os.UserHomeDir()
+		kubeconfigEnv = filepath.Join(home, ".kube", "config")
+	}
+
+	return clientcmd.BuildConfigFromFlags("", kubeconfigEnv)
 }
 
 func main() {
 	fmt.Fprintln(os.Stderr, "🤖 Servidor MCP Kubernetes Advisor Iniciado...")
 
-	// 1. Conexión nativa al clúster (InClusterConfig)
-	config, err := rest.InClusterConfig()
+	// Inicializar cliente de Kubernetes
+	cfg, err := obtenerKubeConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error de InClusterConfig (Solo funciona dentro de K8s): %v\n", err)
+		fmt.Fprintf(os.Stderr, "❌ Error al obtener kubeconfig: %v\n", err)
 		os.Exit(1)
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
+	clientset, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Error al crear el cliente de K8s: %v\n", err)
+		fmt.Fprintf(os.Stderr, "❌ Error al crear clientset: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Fprintln(os.Stderr, "✅ Conexión con la API de Kubernetes establecida.")
+	// Canal para atrapar las señales de terminación del sistema (SIGINT, SIGTERM)
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-	// 2. Loop de escucha del Protocolo MCP (stdin -> stdout)
-	// Usamos un scanner para leer línea por línea lo que la IA nos mande
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		var req JSONRPCRequest
-		linea := scanner.Bytes()
-
-		// Decodificamos el JSON que mandó la IA
-		if err := json.Unmarshal(linea, &req); err != nil {
-			fmt.Fprintf(os.Stderr, "⚠️ Error al decodificar JSON-RPC: %v\n", err)
-			continue
-		}
-
-		// Inicializamos la respuesta estándar
-		resp := JSONRPCResponse{
-			JSONRPC: "2.0",
-			ID:      req.ID,
-		}
-
-		// 3. Ruteo de Métodos del Estándar MCP
-		switch req.Method {
-		case "tools/list":
-			// Le contamos a Jarvis qué herramientas tenemos disponibles
-			resp.Result = map[string]interface{}{
-				"tools": []map[string]interface{}{
-					{
-						"name":        "get_cluster_nodes",
-						"description": "Lista los nodos del clúster de Kubernetes y muestra su estado de salud actual (Ready/NotReady).",
-						"inputSchema": map[string]interface{}{
-							"type":       "object",
-							"properties": map[string]interface{}{},
-						},
-					},
-				},
+	// Levantamos el loop de escucha de la entrada estándar (STDIN) en una Goroutine
+	// Para que el fin de archivo (EOF) no mate el proceso principal de inmediato
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			var req Request
+			if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+				continue
 			}
 
-		case "tools/call":
-			// Jarvis decidió ejecutar una herramienta. Ejecutamos nuestra función de tools.go
-			textoResultado, err := ListarNodos(clientset)
-			if err != nil {
-				resp.Error = map[string]string{"message": err.Error()}
-			} else {
-				resp.Result = MCPResult{
-					Content: []MCPContent{
-						{Type: "text", Text: textoResultado},
-					},
+			var resp Response
+			resp.JSONRPC = "2.0"
+			resp.ID = req.ID
+
+			// Manejo de métodos del protocolo MCP
+			switch req.Method {
+			case "tools/list":
+				resp.Result = ManejarToolsList()
+
+			case "tools/call":
+				resp.Result, err = ManejarToolsCall(req.Params, clientset)
+				if err != nil {
+					resp.Error = map[string]string{"message": err.Error()}
 				}
+
+			default:
+				resp.Error = map[string]string{"message": "Método no soportado"}
 			}
 
-		default:
-			resp.Error = map[string]string{"message": "Método no soportado por este servidor MCP"}
+			// Responder por la salida estándar (STDOUT)
+			jsonResp, _ := json.Marshal(resp)
+			fmt.Println(string(jsonResp))
 		}
+	}()
 
-		// 4. Enviamos la respuesta de vuelta a la IA por stdout
-		jsonResp, _ := json.Marshal(resp)
-		fmt.Println(string(jsonResp))
-	}
+	// El hilo principal se bloquea acá, consumiendo 0% CPU, hasta que K8s mande una señal
+	fmt.Fprintln(os.Stderr, "📌 Servidor bloqueado esperando señales del clúster (SIGTERM/SIGINT)...")
+	<-sigs
+
+	fmt.Fprintln(os.Stderr, "👋 Señal recibida. Cerrando el servidor limpiamente...")
 }
