@@ -48,7 +48,7 @@ spec:
       containers:
         - name: dashboard
           image: crisfiori/cluster-dashboard:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
           livenessProbe:
