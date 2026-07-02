@@ -33,7 +33,7 @@ metadata:
   namespace: platform-tools
   labels:
     app: cluster-dashboard
-stream: platform
+    stream: platform
 spec:
   replicas: 1
   selector:
