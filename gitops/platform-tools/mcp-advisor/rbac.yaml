@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: mcp-advisor-sa
-  namespace: argocd # Lo corremos en argocd para que esté cerca de la IA
+  namespace: platform-tools
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -20,7 +20,7 @@ metadata:
 subjects:
   - kind: ServiceAccount
     name: mcp-advisor-sa
-    namespace: argocd
+    namespace: platform-tools
 roleRef:
   kind: ClusterRole
   name: mcp-advisor-cluster-role
