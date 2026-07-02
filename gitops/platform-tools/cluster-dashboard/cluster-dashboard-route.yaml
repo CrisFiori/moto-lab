@@ -7,7 +7,7 @@ spec:
   parentRefs:
     - group: gateway.networking.k8s.io
       kind: Gateway
-      name: eg # El nombre de tu Gateway de Envoy instalado por Helm
+      name: moto-lab-gateway # El nombre de tu Gateway de Envoy instalado por Helm
       namespace: envoy-gateway-system
   hostnames:
     - "dashboard.moto-lab.local"
