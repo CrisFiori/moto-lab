@@ -8,13 +8,13 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: 'https://github.com/CrisFiori/moto-lab.git'
+    repoURL: "https://github.com/CrisFiori/moto-lab.git"
     targetRevision: HEAD
-    path: gitops/platform-addons # <- Apunta a la carpeta donde están el RBAC y el Deployment
+    path: gitops/platform-tools # <- Apunta a la carpeta donde están el RBAC y el Deployment
     directory:
       recurse: true # <- Activamos recursividad desde el inicio para evitar el error anterior!
   destination:
-    server: 'https://kubernetes.default.svc'
+    server: "https://kubernetes.default.svc"
     namespace: argocd
   syncPolicy:
     automated:
