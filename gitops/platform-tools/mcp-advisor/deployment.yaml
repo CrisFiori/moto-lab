@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mcp-k8s-advisor
-  namespace: argocd
+  namespace: platform-tools
   labels:
     app: mcp-k8s-advisor
 spec:
@@ -19,7 +19,7 @@ spec:
       serviceAccountName: mcp-advisor-sa
       containers:
         - name: advisor
-          # Nota: Esta es una imagen local que construiremos en el clúster de Kind, 
+          # Nota: Esta es una imagen local que construiremos en el clúster de Kind,
           # o podés subirla a tu Docker Hub. Por ahora la dejamos declarada:
           image: crisfiori/mcp-k8s-advisor:latest
           imagePullPolicy: IfNotPresent
