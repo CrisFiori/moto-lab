@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -28,6 +31,21 @@ type NodeInfo struct {
 	CPUCapacity      string `json:"cpu"`
 	MemoryCapacity   string `json:"memory"`
 	ContainerRuntime string `json:"containerRuntime"`
+}
+
+// AppInfo representa el JSON de salida del módulo de ArgoCD Applications
+type AppInfo struct {
+	Name   string `json:"name"`
+	Sync   string `json:"sync"`   // "Synced" / "OutOfSync"
+	Health string `json:"health"` // "Healthy" / "Progressing" / "Degraded"
+}
+
+// GVR (GroupVersionResource) del CRD Application de ArgoCD.
+// Se arma a partir del apiVersion "argoproj.io/v1alpha1" que usás en tus YAML de ArgoCD.
+var argoAppGVR = schema.GroupVersionResource{
+	Group:    "argoproj.io",
+	Version:  "v1alpha1",
+	Resource: "applications",
 }
 
 // Lógica de detección de entorno para obtener el Kubeconfig (Igual al MCP)
@@ -61,10 +79,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Dynamic client: mismo config (cfg), pero para recursos no nativos (CRDs como Application)
+	dynClient, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		fmt.Printf("❌ Error al crear dynamic client: %v\n", err)
+		os.Exit(1)
+	}
+
 	// 2. Mapeamos los Handlers (Endpoints) de nuestro servidor web
 
-	// Endpoint de la API que consume el Front
+	// Endpoint de nodos (ya existente)
 	http.HandleFunc("/api/v1/cluster-info", srcClusterInfoHandler(clientset))
+
+	// Endpoint nuevo: estado de las Applications de ArgoCD
+	http.HandleFunc("/api/v1/argo-apps", srcArgoAppsHandler(dynClient))
 
 	// Endpoint de salud para los Probes de Kubernetes
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +101,6 @@ func main() {
 	})
 
 	// Servidor de archivos estáticos para el Frontend (HTML/JS/CSS)
-	// Va a buscar los archivos dentro de una carpeta llamada 'ui' al mismo nivel del binario
 	fs := http.FileServer(http.Dir("./ui"))
 	http.Handle("/", fs)
 
@@ -85,36 +112,28 @@ func main() {
 	}
 }
 
-// srcClusterInfoHandler es una función de alto orden (devuelve un Handler HTTP)
-// Le pasamos el 'clientset' para que la función interna pueda consultar a Kubernetes
+// srcClusterInfoHandler devuelve info de versión y nodos del cluster
 func srcClusterInfoHandler(clientset *kubernetes.Clientset) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Seteamos los headers para manejar CORS y decirle al navegador que mandamos JSON
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
-		// context.Background() es obligatorio en llamadas modernas de client-go para manejar timeouts
 		ctx := context.Background()
 
-		// A. Consultar la versión del clúster
 		versionInfo, err := clientset.Discovery().ServerVersion()
 		k8sVersion := "Desconocida"
 		if err == nil {
 			k8sVersion = versionInfo.GitVersion
 		}
 
-		// B. Consultar los Nodos del clúster (Llamada Cluster-Wide)
-		// metav1.ListOptions{} vacío significa: "Traeme todos los nodos sin filtros ni labels"
 		nodeList, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error": "No se pudieron listar los nodos: %v"}`, err), http.StatusInternalServerError)
 			return
 		}
 
-		// C. Procesar y formatear la información de los nodos
 		var nodosInfo []NodeInfo
 		for _, node := range nodeList.Items {
-			// Evaluamos el estado (Status) del nodo recorriendo sus condiciones
 			status := "NotReady"
 			for _, cond := range node.Status.Conditions {
 				if cond.Type == "Ready" && cond.Status == "True" {
@@ -123,13 +142,11 @@ func srcClusterInfoHandler(clientset *kubernetes.Clientset) http.HandlerFunc {
 				}
 			}
 
-			// Identificamos el rol del nodo buscando en sus labels nativos
 			role := "worker"
 			if _, ok := node.Labels["node-role.kubernetes.io/control-plane"]; ok {
 				role = "control-plane"
 			}
 
-			// Armamos nuestra estructura limpia
 			nodosInfo = append(nodosInfo, NodeInfo{
 				Name:             node.Name,
 				Status:           status,
@@ -140,14 +157,44 @@ func srcClusterInfoHandler(clientset *kubernetes.Clientset) http.HandlerFunc {
 			})
 		}
 
-		// D. Empaquetamos todo en la estructura final
 		data := ClusterData{
 			K8sVersion: k8sVersion,
 			TotalNodes: len(nodeList.Items),
 			Nodes:      nodosInfo,
 		}
 
-		// E. Serializamos a JSON y respondemos al cliente
 		json.NewEncoder(w).Encode(data)
+	}
+}
+
+// srcArgoAppsHandler devuelve el estado de sync/health de las Applications de ArgoCD
+func srcArgoAppsHandler(dynClient dynamic.Interface) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		ctx := context.Background()
+
+		list, err := dynClient.Resource(argoAppGVR).
+			Namespace("argocd").
+			List(ctx, metav1.ListOptions{})
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error": "No se pudieron listar las Applications: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+
+		var apps []AppInfo
+		for _, item := range list.Items {
+			syncStatus, _, _ := unstructured.NestedString(item.Object, "status", "sync", "status")
+			healthStatus, _, _ := unstructured.NestedString(item.Object, "status", "health", "status")
+
+			apps = append(apps, AppInfo{
+				Name:   item.GetName(),
+				Sync:   syncStatus,
+				Health: healthStatus,
+			})
+		}
+
+		json.NewEncoder(w).Encode(apps)
 	}
 }

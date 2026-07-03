@@ -30,9 +30,75 @@
                 Consultando al API Server...
             </div>
         </div>
+
+        <h2 class="text-lg font-semibold text-gray-400 mb-4 mt-10">Estado de las Applications (ArgoCD)</h2>
+
+        <div id="argo-apps-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div class="col-span-full text-center py-12 text-gray-500 font-mono">
+                Consultando a ArgoCD...
+            </div>
+        </div>
     </main>
 
     <script>
+        async function cargarArgoApps() {
+            try {
+                const res = await fetch('/api/v1/argo-apps');
+                if (!res.ok) throw new Error('Error al conectar con la API de ArgoCD Apps');
+                const apps = await res.json();
+
+                const contenedor = document.getElementById('argo-apps-container');
+                contenedor.innerHTML = '';
+
+                if (!apps || apps.length === 0) {
+                    contenedor.innerHTML = `
+                        <div class="col-span-full text-center py-12 text-gray-500 font-mono">
+                            No se encontraron Applications.
+                        </div>
+                    `;
+                    return;
+                }
+
+                apps.forEach(app => {
+                    const healthColor = app.health === 'Healthy'
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                        : app.health === 'Progressing'
+                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                            : 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+
+                    const syncColor = app.sync === 'Synced'
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                        : 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+
+                    contenedor.innerHTML += `
+                        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 shadow-lg flex flex-col justify-between">
+                            <div>
+                                <div class="flex justify-between items-start mb-3">
+                                    <h3 class="text-md font-bold text-gray-200 truncate max-w-[180px]">${app.name}</h3>
+                                    <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold border ${healthColor}">
+                                        ${app.health}
+                                    </span>
+                                </div>
+                                <div class="space-y-2 text-sm text-gray-400">
+                                    <div class="flex justify-between border-b border-gray-800/50 pb-1">
+                                        <span>Sync Status:</span>
+                                        <span class="px-2 py-0.2 rounded text-xs border ${syncColor}">${app.sync}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+            } catch (error) {
+                console.error(error);
+                document.getElementById('argo-apps-container').innerHTML = `
+                    <div class="col-span-full bg-rose-500/5 border border-rose-500/10 text-rose-400 p-4 rounded-xl text-center font-mono">
+                        💥 Error al cargar Applications: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
         async function fetchClusterData() {
             try {
                 // Le pega al endpoint relativo que expone nuestro binario de Go
@@ -96,6 +162,7 @@
 
         // Ejecutar al cargar la página
         fetchClusterData();
+        cargarArgoApps();
     </script>
 </body>
 
