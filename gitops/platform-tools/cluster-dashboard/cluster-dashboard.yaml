@@ -50,7 +50,7 @@ spec:
       serviceAccountName: cluster-dashboard-sa
       containers:
         - name: dashboard
-          image: crisfiori/cluster-dashboard:latest
+          image: moto-lab-dashboard:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
