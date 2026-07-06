@@ -1,17 +1,26 @@
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
 metadata:
   name: catalog-route
-  namespace: moto-catalog # Vive en el namespace de la app
+  namespace: moto-catalog
 spec:
-  parentRefs:
-    - name: moto-lab-gateway
-      namespace: envoy-gateway-system # Apunta al peaje central
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /catalog
-      backendRefs:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`dashboard.moto-lab.local`) && PathPrefix(`/catalog`)
+      kind: Rule
+      services:
         - name: catalog-service
-          port: 80 # El puerto ClusterIP de la app
+          port: 80
+      middlewares:
+        - name: catalog-strip-prefix
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: catalog-strip-prefix
+  namespace: moto-catalog
+spec:
+  stripPrefix:
+    prefixes:
+      - /catalog
