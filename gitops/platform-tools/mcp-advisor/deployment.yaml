@@ -21,7 +21,7 @@ spec:
         - name: advisor
           # Nota: Esta es una imagen local que construiremos en el clúster de Kind,
           # o podés subirla a tu Docker Hub. Por ahora la dejamos declarada:
-          image: ghcr.io/crisfiori/mcp-advisor:v0.1.0
+          image: ghcr.io/crisfiori/mcp-k8s-advisor:v0.1.0
           imagePullPolicy: IfNotPresent
           resources:
             limits:
